@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dispatch-simulator/internal/defs"
+	"github.com/dispatch-simulator/internal/helper"
 	"go.melnyk.org/mlog"
 )
 
@@ -62,6 +63,8 @@ func (process *process) Listen() {
 				ev.String("Order Name", o.Name)
 				ev.String("Order ready at", time.Now().String())
 			})
+			//Time when the order is ready
+			t := time.Now().UnixNano() / 100000
 
 			did := ""
 			if process.config.Mode == defs.Matched {
@@ -87,6 +90,11 @@ func (process *process) Listen() {
 						ev.String("has been picked up by ", did)
 						ev.String("from the kitchen", "")
 					})
+					orderreadytime := ready.(int64)
+					//Order is ready to be picked up in the kitchen
+					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+						ev.Int("Average wait time for Order to be picked up by dispatcher is ", int(helper.Abs(time.Now().UnixNano()/1000000-orderreadytime)))
+					})
 					//cleanup dispatch and order queue and map
 					process.storage.Delete(defs.ORDERREADY + o.ID)
 					process.storage.Delete(defs.DISPATCHREADY + did)
@@ -99,7 +107,7 @@ func (process *process) Listen() {
 						ev.String("to arrive", "")
 					})
 					//Set order is ready for pickup when dispatcher arrives later
-					process.storage.Insert(defs.ORDERREADY+o.ID, true)
+					process.storage.Insert(defs.ORDERREADY+o.ID, t)
 				}
 			}
 		}

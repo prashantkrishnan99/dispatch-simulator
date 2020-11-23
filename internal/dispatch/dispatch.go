@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dispatch-simulator/internal/defs"
+	"github.com/dispatch-simulator/internal/helper"
 	"go.melnyk.org/mlog"
 )
 
@@ -69,6 +70,8 @@ func (dispatch *dispatch) Receive() {
 							ev.String("Dispatcher ", d.DispatchID)
 							ev.String("Has arrived at the kitchen at time", time.Now().String())
 						})
+						//Time when the dispatcher has arrived
+						t := time.Now().UnixNano() / 100000
 						//On arrival of dispatcher check if order is present to be dispatched
 						//For matched algorithm, match order to dispatch
 						if d.Algo == defs.Matched {
@@ -81,6 +84,12 @@ func (dispatch *dispatch) Receive() {
 									ev.String("has picked up order ", d.OrderID)
 									ev.String("from the kitchen", "")
 								})
+								orderreadytime := ready.(int64)
+								//Order is ready to be picked up in the kitchen
+								dispatch.log.Event(mlog.Verbose, func(ev mlog.Event) {
+									ev.Int("Average wait time for Dispatcher to pick up the order is ", int(helper.Abs(time.Now().UnixNano()/1000000-orderreadytime)))
+								})
+
 								//cleanup dispatch and order queue and map
 								dispatch.storage.Delete(defs.ORDERREADY + d.OrderID)
 								dispatch.storage.Delete(defs.DISPATCHREADY + d.DispatchID)
@@ -93,7 +102,7 @@ func (dispatch *dispatch) Receive() {
 									ev.String("to be ready", "")
 								})
 								//Set dispatch is ready for pickup when order is prepared and ready
-								dispatch.storage.Insert(defs.DISPATCHREADY+d.DispatchID, true)
+								dispatch.storage.Insert(defs.DISPATCHREADY+d.DispatchID, t)
 							}
 						}
 						dispatch.storage.Insert(d.DispatchID, d.OrderID)
