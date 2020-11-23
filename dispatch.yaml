@@ -1,11 +1,18 @@
 # Default configuration for dispatch-simulator
 runner:
-    logic:
+    dispatch:
+        #This denotes the earliest the dispatcher can come to the kitchen
+        dispatcharrivalstart: 3
+        #This denotes the latest the dispatcher can come to the kitchen
+        dispatcharrivalend: 15
+    process:
+        config: "dispatch_orders.json"
+        #This denotes the rate limitter (currently set to 2reqs/sec i.e. 1 req/500msec)
+        time: 500 
         #mode: What mode the system has to run
         #0: Matched
         #1: FIFO
-        mode: 0
-    dispatch:
-    process:
-        config: "dispatch_orders.json"
-        time: 500 #Milliseconds
+        mode: 0   
+logger:
+    type: console
+    level: verbose
