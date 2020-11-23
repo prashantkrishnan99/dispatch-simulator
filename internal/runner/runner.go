@@ -49,11 +49,13 @@ func NewRunner(config Config, log mlog.Joiner) Runner {
 	}
 
 	store := NewStorage()
+	orderqueue := NewQueue()
+	dispatchqueue := NewQueue()
 
-	dispatch := dispatch.NewDispatch(config.Dispatch, log, store)
+	dispatch := dispatch.NewDispatch(config.Dispatch, log, store, dispatchqueue)
 	runner.dispatch = dispatch
 
-	process := process.NewProcess(config.Process, log, dispatch, store)
+	process := process.NewProcess(config.Process, log, dispatch, store, orderqueue)
 	runner.process = process
 
 	return runner

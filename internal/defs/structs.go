@@ -18,4 +18,5 @@ type Courier struct {
 type Dispatch struct {
 	OrderID    string `json:"order_id"`
 	DispatchID string `json:"dispatch_id"`
+	Algo       int    `json:"algo"`
 }

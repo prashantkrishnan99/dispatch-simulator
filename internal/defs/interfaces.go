@@ -9,3 +9,12 @@ type Store interface {
 	Dump() interface{}
 	IsEmpty() bool
 }
+
+//QueueStore : Storage Interface
+type QueueStore interface {
+	Enqueue(t Item)
+	Dequeue() *Item
+	Front() *Item
+	Size() int
+	IsEmpty() bool
+}

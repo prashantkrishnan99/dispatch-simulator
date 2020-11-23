@@ -19,6 +19,7 @@ type process struct {
 	log          mlog.Logger
 	dispatchsink chan<- defs.Dispatch
 	storage      defs.Store
+	queue        defs.QueueStore
 }
 
 //DispatchSink :
@@ -34,20 +35,21 @@ type Config struct {
 }
 
 //NewProcess :
-func NewProcess(config Config, log mlog.Joiner, dispatchsink DispatchSink, store defs.Store) *process {
+func NewProcess(config Config, log mlog.Joiner, dispatchsink DispatchSink, store defs.Store, queue defs.QueueStore) *process {
 	return &process{
 		config:       config,
 		processQueue: make(chan defs.Order),
 		log:          log.Join("Order Processor"),
 		dispatchsink: dispatchsink.DispatchSink(),
 		storage:      store,
+		queue:        queue,
 	}
 }
 
 func (process *process) CreateDispatchID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	dispID := make([]byte, 16)
+	rand.Read(dispID)
+	return "dispatch_" + fmt.Sprintf("%x-%x-%x-%x-%x", dispID[0:4], dispID[4:6], dispID[6:8], dispID[8:10], dispID[10:])
 }
 
 func (process *process) Listen() {
@@ -60,6 +62,46 @@ func (process *process) Listen() {
 				ev.String("Order Name", o.Name)
 				ev.String("Order ready at", time.Now().String())
 			})
+
+			did := ""
+			if process.config.Mode == defs.Matched {
+				//Get the dispatcher from the map for the orderid
+				//Check if the dispatcher is ready
+				//Is maintained as "ready_<dispatch> : true"
+				if didforoid := process.storage.Get(o.ID); didforoid != nil {
+					//dispatchID
+					did = didforoid.(string)
+				} else {
+					process.log.Event(mlog.Error, func(ev mlog.Event) {
+						ev.Error("msg", fmt.Errorf("DispatchID for an order should be present"))
+					})
+					continue
+				}
+				//Check if dispatcher is ready to pick up
+				//if not set order ready for dispatcher to collect
+				//later
+				if ready := process.storage.Get(defs.DISPATCHREADY + did); ready != nil {
+					//Dispatcher is ready and waiting in the kitchen
+					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+						ev.String("Order ", o.ID)
+						ev.String("has been picked up by ", did)
+						ev.String("from the kitchen", "")
+					})
+					//cleanup dispatch and order queue and map
+					process.storage.Delete(defs.ORDERREADY + o.ID)
+					process.storage.Delete(defs.DISPATCHREADY + did)
+					process.storage.Delete(o.ID)
+					//print statistics
+				} else {
+					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+						ev.String("Order ", o.ID)
+						ev.String("is ready and waiting for dispatcher ", did)
+						ev.String("to arrive", "")
+					})
+					//Set order is ready for pickup when dispatcher arrives later
+					process.storage.Insert(defs.ORDERREADY+o.ID, true)
+				}
+			}
 		}
 	}
 }
@@ -78,10 +120,6 @@ func (process *process) Run() error {
 	json.Unmarshal(v, &order)
 	//listen in order queue
 	go process.Listen()
-	//Based on Mode, select the algorithm you want to run
-	//0: Stands for Matched ALgorithm
-	//1: Stands for FiFO ALgorithm
-	process.SelectAlgo()
 	//Queue the order for processing
 	go process.Queue(order)
 	return nil
@@ -94,16 +132,16 @@ func (process *process) Prepare(order defs.Order) {
 	var wait sync.WaitGroup
 	wait.Add(1)
 
-	go func(ticker *time.Ticker) {
+	go func(ticker *time.Ticker, o defs.Order) {
 		wait.Done()
 		for {
 			select {
 			case <-ticker.C:
 				ticker.Stop()
-				process.processQueue <- order
+				process.processQueue <- o
 			}
 		}
-	}(ticker)
+	}(ticker, order)
 
 	wait.Wait()
 	return
@@ -111,9 +149,15 @@ func (process *process) Prepare(order defs.Order) {
 
 //Dispatch: API to invoke a dispatcher to collect the order on complete
 func (process *process) Dispatch(order defs.Order) {
+	//create DispatchID
+	dID := process.CreateDispatchID()
+	//before invoking dispatcher; maintain orderid to dispatch id map
+	process.storage.Insert(order.ID, dID)
+	//Send dispatch details to dispatch service
 	process.dispatchsink <- defs.Dispatch{
-		DispatchID: process.CreateDispatchID(),
+		DispatchID: dID,
 		OrderID:    order.ID,
+		Algo:       process.config.Mode,
 	}
 }
 
@@ -135,10 +179,9 @@ func (process *process) Queue(order []defs.Order) {
 			ev.String("Name", o.Name)
 			ev.String("ready at", time.Now().String())
 		})
-		//On receiving an order, we have to do 2 things
-		//dispatch: Invoke a dispatcher to pick up the order when ready
-		//prepare: Prepare the order
+		//On receiving an order, Invoke a dispatcher to pick up the order when ready
 		process.Dispatch(o)
+		//On receiving an order, Prepare the order
 		process.Prepare(o)
 	}
 }

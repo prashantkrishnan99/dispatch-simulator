@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/braintree-go/braintree-go v0.22.0
+	github.com/cheekybits/genny v1.0.0
 	github.com/dimfeld/httptreemux v5.0.1+incompatible
 	github.com/google/gopacket v1.1.19
 	github.com/lithammer/shortuuid v3.0.0+incompatible
