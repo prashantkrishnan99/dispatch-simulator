@@ -18,3 +18,13 @@ type QueueStore interface {
 	Size() int
 	IsEmpty() bool
 }
+
+//Stats :
+type Stats interface {
+	IncrOrdersProcessed()
+	IncrTotalTime(int)
+	CalculateAverage()
+	GetTotalOrdersProcessed() int
+	GetTotalTime() int
+	GetAVerageTime() int
+}

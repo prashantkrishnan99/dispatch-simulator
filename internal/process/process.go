@@ -6,21 +6,23 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
 	"github.com/dispatch-simulator/internal/defs"
-	"github.com/dispatch-simulator/internal/helper"
 	"go.melnyk.org/mlog"
 )
 
 type process struct {
-	config       Config
-	processQueue chan defs.Order
-	log          mlog.Logger
-	dispatchsink chan<- defs.Dispatch
-	storage      defs.Store
-	queue        defs.QueueStore
+	config        Config
+	processQueue  chan defs.Order
+	log           mlog.Logger
+	dispatchsink  chan<- defs.Dispatch
+	storage       defs.Store
+	orderqueue    defs.QueueStore
+	dispatchqueue defs.QueueStore
+	stats         defs.Stats
 }
 
 //DispatchSink :
@@ -36,14 +38,16 @@ type Config struct {
 }
 
 //NewProcess :
-func NewProcess(config Config, log mlog.Joiner, dispatchsink DispatchSink, store defs.Store, queue defs.QueueStore) *process {
+func NewProcess(config Config, log mlog.Joiner, dispatchsink DispatchSink, store defs.Store, orderqueue defs.QueueStore, dispatchqueue defs.QueueStore, stats defs.Stats) *process {
 	return &process{
-		config:       config,
-		processQueue: make(chan defs.Order),
-		log:          log.Join("Order Processor"),
-		dispatchsink: dispatchsink.DispatchSink(),
-		storage:      store,
-		queue:        queue,
+		config:        config,
+		processQueue:  make(chan defs.Order),
+		log:           log.Join("Order Processor"),
+		dispatchsink:  dispatchsink.DispatchSink(),
+		storage:       store,
+		orderqueue:    orderqueue,
+		dispatchqueue: dispatchqueue,
+		stats:         stats,
 	}
 }
 
@@ -64,7 +68,7 @@ func (process *process) Listen() {
 				ev.String("Order ready at", time.Now().String())
 			})
 			//Time when the order is ready
-			t := time.Now().UnixNano() / 100000
+			t := time.Now()
 
 			did := ""
 			if process.config.Mode == defs.Matched {
@@ -90,16 +94,73 @@ func (process *process) Listen() {
 						ev.String("has been picked up by ", did)
 						ev.String("from the kitchen", "")
 					})
-					orderreadytime := ready.(int64)
+					orderreadytime := ready.(time.Time)
 					//Order is ready to be picked up in the kitchen
+					absoluteTime := t.Sub(orderreadytime)
 					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
-						ev.Int("Average wait time for Order to be picked up by dispatcher is ", int(helper.Abs(time.Now().UnixNano()/1000000-orderreadytime)))
+						ev.Int("Average wait time for Order to be picked up by dispatcher is ", int(absoluteTime.Milliseconds()))
 					})
+
+					//Calculate stats
+					process.stats.IncrOrdersProcessed()
+					process.stats.IncrTotalTime(int(absoluteTime.Milliseconds()))
+					process.stats.CalculateAverage()
+
+					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+						ev.Int("Running Average wait time for Dispatcher to pick up the order is ", process.stats.GetAVerageTime())
+					})
+
 					//cleanup dispatch and order queue and map
 					process.storage.Delete(defs.ORDERREADY + o.ID)
 					process.storage.Delete(defs.DISPATCHREADY + did)
 					process.storage.Delete(o.ID)
-					//print statistics
+				} else {
+					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+						ev.String("Order ", o.ID)
+						ev.String("is ready and waiting for dispatcher ", did)
+						ev.String("to arrive", "")
+					})
+					//Set order is ready for pickup when dispatcher arrives later
+					process.storage.Insert(defs.ORDERREADY+o.ID, t)
+				}
+			} else if process.config.Mode == defs.Fifo {
+				//Add order to order queue
+				//check if dispatch queue is not empty
+				//if empty wait in order queue
+				//if not empty, assign order to the first dispatcher
+				process.orderqueue.Enqueue(o.ID)
+				if process.dispatchqueue.Size() != 0 {
+					dispatcher := process.dispatchqueue.Dequeue()
+					castvar := reflect.ValueOf(*dispatcher)
+					if ready := process.storage.Get(defs.DISPATCHREADY + castvar.String()); ready != nil {
+						//Dispatcher is ready and waiting in the kitchen
+						process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+							ev.String("Order ", o.ID)
+							ev.String("has been picked up by ", castvar.String())
+							ev.String("from the kitchen", "")
+						})
+						orderreadytime := ready.(time.Time)
+						//Order is ready to be picked up in the kitchen
+						absoluteTime := t.Sub(orderreadytime)
+						process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+							ev.Int("Average wait time for Order to be picked up by dispatcher is ", int(absoluteTime.Milliseconds()))
+						})
+
+						//Calculate stats
+						process.stats.IncrOrdersProcessed()
+						process.stats.IncrTotalTime(int(absoluteTime.Milliseconds()))
+						process.stats.CalculateAverage()
+
+						process.log.Event(mlog.Verbose, func(ev mlog.Event) {
+							ev.Int("Running Average wait time for Dispatcher to pick up the order is ", process.stats.GetAVerageTime())
+						})
+
+						//cleanup dispatch and order queue and map
+						process.storage.Delete(defs.ORDERREADY + o.ID)
+						process.storage.Delete(defs.DISPATCHREADY + did)
+
+						process.orderqueue.Dequeue()
+					}
 				} else {
 					process.log.Event(mlog.Verbose, func(ev mlog.Event) {
 						ev.String("Order ", o.ID)

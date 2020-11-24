@@ -30,9 +30,12 @@ func (s *Queue) Enqueue(t defs.Item) {
 func (s *Queue) Dequeue() *defs.Item {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	item := s.items[0]
-	s.items = s.items[1:len(s.items)]
-	return &item
+	if !s.IsEmpty() {
+		item := s.items[0]
+		s.items = s.items[1:len(s.items)]
+		return &item
+	}
+	return nil
 }
 
 //Front :

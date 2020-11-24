@@ -12,7 +12,7 @@ runner:
         #mode: What mode the system has to run
         #0: Matched
         #1: FIFO
-        mode: 0   
+        mode: 0
 logger:
     type: console
     level: verbose

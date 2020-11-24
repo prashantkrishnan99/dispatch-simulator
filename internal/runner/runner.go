@@ -7,6 +7,7 @@ import (
 	"github.com/dispatch-simulator/internal/defs"
 	"github.com/dispatch-simulator/internal/dispatch"
 	"github.com/dispatch-simulator/internal/process"
+	"github.com/dispatch-simulator/internal/stats"
 	"go.melnyk.org/mlog"
 )
 
@@ -52,10 +53,12 @@ func NewRunner(config Config, log mlog.Joiner) Runner {
 	orderqueue := NewQueue()
 	dispatchqueue := NewQueue()
 
-	dispatch := dispatch.NewDispatch(config.Dispatch, log, store, dispatchqueue)
+	stats := stats.NewStats()
+
+	dispatch := dispatch.NewDispatch(config.Dispatch, log, store, orderqueue, dispatchqueue, stats)
 	runner.dispatch = dispatch
 
-	process := process.NewProcess(config.Process, log, dispatch, store, orderqueue)
+	process := process.NewProcess(config.Process, log, dispatch, store, orderqueue, dispatchqueue, stats)
 	runner.process = process
 
 	return runner
